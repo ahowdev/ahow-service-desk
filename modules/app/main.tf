@@ -1,0 +1,105 @@
+/* Security group for the app */
+resource "aws_security_group" "app-server-sg" {
+  name        = "${var.environment}-app-server-sg"
+  description = "Security group for app that allows web traffic from internet"
+  vpc_id      = "${var.vpc_id}"
+
+  ingress {
+    from_port = 22 
+    to_port   = 22
+    protocol  = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port = 80
+    to_port   = 80
+    protocol  = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 8
+    to_port     = 0
+    protocol    = "icmp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags {
+    Name        = "${var.environment}-app-server-sg"
+    Environment = "${var.environment}"
+  }
+}
+
+resource "aws_security_group" "app-inbound-sg" {
+  name        = "${var.environment}-app-inbound-sg"
+  description = "Allow HTTP from Anywhere"
+  vpc_id      = "${var.vpc_id}"
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 8
+    to_port     = 0
+    protocol    = "icmp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags {
+    Name = "${var.environment}-app-inbound-sg"
+  }
+}
+
+/* App servers */
+resource "aws_instance" "app" {
+  ami               = "${lookup(var.amis, var.region)}"
+  instance_type     = "${var.instance_type}"
+  subnet_id         = "${var.public_subnet_id}"
+  vpc_security_group_ids = [
+    "${aws_security_group.app-server-sg.id}"
+  ]
+  key_name          = "${var.key_name}"
+  user_data         = "${file("${path.module}/files/user_data.sh")}"
+  tags = {
+    Name        = "${var.environment}-app"
+    Environment = "${var.environment}"
+  }
+}
+
+/* Load Balancer */
+resource "aws_elb" "app" {
+  name            = "${var.environment}-app-lb"
+  subnets         = ["${var.public_subnet_id}"]
+  security_groups = ["${aws_security_group.app-inbound-sg.id}"]
+
+  listener {
+    instance_port     = 80
+    instance_protocol = "http"
+    lb_port           = 80
+    lb_protocol       = "http"
+  }
+  instances = ["${aws_instance.app.id}"]
+
+  tags {
+    Environment = "${var.environment}"
+  }
+}
